@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="Linux Log Analyzer & Telemetry Engine",
-    description="Asynchronous engine for parsing raw Linux system logs, extracting severity levels, and computing error rates.",
-    version="1.0.0",
+    description="Asynchronous engine for parsing raw Linux system logs using robust regex patterns, extracting severity levels, and computing metrics.",
+    version="1.1.0",
 )
 
 class LogPayload(BaseModel):
@@ -25,13 +25,13 @@ class LogAnalysisResponse(BaseModel):
     info_count: int
     flagged_entries: List[str]
 
-# Simple syslog pattern extractor
-LOG_PATTERN = re.compile(r"\[(ERROR|WARNING|INFO)\]|ERROR|WARNING")
+# Robust regex pattern to catch explicitly bracketed or standalone severity tags
+LOG_PATTERN = re.compile(r"\[(ERROR|WARNING|INFO)\]|\b(ERROR|WARNING|INFO|WARN)\b", re.IGNORECASE)
 
 @app.post("/parse-logs", response_model=LogAnalysisResponse, status_code=status.HTTP_200_OK)
 async def parse_syslog(payload: LogPayload):
     """
-    Ingests raw Linux syslog lines, categorizes entry severity, and isolates high-priority system alerts.
+    Ingests raw Linux syslog lines, categorizes entry severity using regex search, and isolates alerts.
     """
     if not payload.raw_logs:
         raise HTTPException(
@@ -45,13 +45,18 @@ async def parse_syslog(payload: LogPayload):
     flagged = []
 
     for line in payload.raw_logs:
-        upper_line = line.upper()
-        if "ERROR" in upper_line:
-            errors += 1
-            flagged.append(line)
-        elif "WARNING" in upper_line or "WARN" in upper_line:
-            warnings += 1
-            flagged.append(line)
+        match = LOG_PATTERN.search(line)
+        if match:
+            # Extract matched group from either group 1 or group 2
+            severity = next((g for g in match.groups() if g), "").upper()
+            if "ERROR" in severity:
+                errors += 1
+                flagged.append(line)
+            elif "WARN" in severity:
+                warnings += 1
+                flagged.append(line)
+            else:
+                info += 1
         else:
             info += 1
 
